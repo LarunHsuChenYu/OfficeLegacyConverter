@@ -8,3 +8,4 @@
 - 語意覆蓋率改為依缺表頁數揭露，不再顯示固定 `90%+`。
 - 主畫面抬頭及視窗標題顯示版本與發布日期。
 - `.msg` 輸出標記為 `extraction_only`；使用 `Mail/extracted/` 時保留 Primary `.msg` 到 `Mail/raw/`。
+- 升級 MsgReader 6.1.1 與 PDFsharp 6.2.4，移除 OpenMcdf 3.0.0 的已知中度弱點。
