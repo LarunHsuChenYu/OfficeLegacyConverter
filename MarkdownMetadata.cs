@@ -23,6 +23,8 @@ internal sealed class KnownGap
     public string? Field { get; init; }
     public string? Description { get; init; }
     public string? Severity { get; init; }
+    public string? StructuredTableStatus { get; init; }
+    public string? RecoveryStatus { get; init; }
     public int[]? PdfPages { get; init; }
 }
 

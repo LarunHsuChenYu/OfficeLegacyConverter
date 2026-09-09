@@ -49,7 +49,12 @@ var result = MarkdownPostProcessor.Process(
 var qualityPath = result.QualityJsonPath!;
 var json = JsonDocument.Parse(File.ReadAllText(qualityPath));
 var gaps = json.RootElement.GetProperty("gaps").EnumerateArray()
-    .Select(g => (Type: g.GetProperty("Type").GetString(), Loc: g.GetProperty("Location").GetString()))
+    .Select(g => (
+        Type: g.GetProperty("Type").GetString(),
+        Loc: g.GetProperty("Location").GetString(),
+        Recovery: g.TryGetProperty("recovery_status", out var recovery)
+            ? recovery.GetString()
+            : null))
     .ToList();
 var missing = gaps.Where(g => g.Type == "missing_table").ToList();
 var qualityPages = json.RootElement
@@ -103,11 +108,22 @@ var page10Ocr = enhance.Pages.Single(p => p.PageNumber == 10).OcrPreview;
 var page10TailFound = enhance.PagesExported != 16
     || new[] { "20,811", "2,671", "3,999" }
         .All(value => page10Ocr.Contains(value, StringComparison.Ordinal));
+var page14Ocr = enhance.Pages.Single(p => p.PageNumber == 14).OcrPreview;
+var page14ValuesFound = enhance.PagesExported != 16
+    || new[] { "49,566,416", "30,099,945" }
+        .All(value => page14Ocr.Contains(value, StringComparison.Ordinal));
+var noSparseSupplementNoise =
+    !md.Contains("OCR 補充辨識（稀疏數值）", StringComparison.Ordinal);
+var recoveryStatusIsExplicit = missing.All(
+    gap => gap.Recovery == "ocr_available_unverified");
 Console.WriteLine($"full OCR not truncated={fullTextNotTruncated}");
 Console.WriteLine($"p4 tail found={page4TailFound}");
 Console.WriteLine($"p7 tail found={page7TailFound}");
 Console.WriteLine($"p9 RI values found={page9RiValuesFound}");
 Console.WriteLine($"p10 tail found={page10TailFound}");
+Console.WriteLine($"p14 values found={page14ValuesFound}");
+Console.WriteLine($"no sparse supplement noise={noSparseSupplementNoise}");
+Console.WriteLine($"recovery status explicit={recoveryStatusIsExplicit}");
 Console.WriteLine($"quality reports complete OCR={qualityReportsCompleteOcr}");
 var ok =
     actualLikelyPages.SequenceEqual(expectedMissingPages)
@@ -120,6 +136,9 @@ var ok =
     && page7TailFound
     && page9RiValuesFound
     && page10TailFound
+    && page14ValuesFound
+    && noSparseSupplementNoise
+    && recoveryStatusIsExplicit
     && qualityReportsCompleteOcr
     && semanticCoverageIsDynamic;
 Console.WriteLine(ok ? "REGRESS_OK" : "REGRESS_FAIL");

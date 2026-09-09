@@ -34,6 +34,7 @@ internal sealed class PdfPageInfo
     public string ImageCaption { get; init; } = "";
     public string OcrPreview { get; init; } = "";
     public string OcrStatus { get; init; } = "not_attempted";
+    public string OcrMethod { get; init; } = "none";
     public IReadOnlyList<string> ContextHints { get; init; } = [];
 }
 
@@ -201,6 +202,7 @@ internal static class PdfEnhancementService
                         ImageCaption = p.ImageCaption ?? "",
                         OcrPreview = p.OcrPreview ?? "",
                         OcrStatus = p.OcrStatus ?? "not_attempted",
+                        OcrMethod = p.OcrMethod ?? "none",
                         ContextHints = p.ContextHints ?? []
                     };
                 }).ToList() ?? [];
@@ -315,6 +317,9 @@ internal static class PdfEnhancementService
 
         [JsonPropertyName("ocr_status")]
         public string? OcrStatus { get; set; }
+
+        [JsonPropertyName("ocr_method")]
+        public string? OcrMethod { get; set; }
 
         [JsonPropertyName("context_hints")]
         public List<string>? ContextHints { get; set; }

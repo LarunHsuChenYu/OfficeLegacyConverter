@@ -1150,7 +1150,7 @@ flowchart LR
 | `missing_image` | 參考資料區段缺圖 | high |
 | `missing_table` | 該頁疑似影像／Excel 截圖表，文字層無明細表 | high |
 
-**缺表備援：** 影像判斷會排除全頁背景與小型 Logo，只計入內容區嵌入圖。對 `missing_table` 頁裁切表格區，以 400 DPI、PSM 3 與 PSM 11 執行辨識，並於正文插入 `[表格遺失]`、文字層脈絡「圖片描述」、完整 OCR 文字及整頁 `imgN.png`。OCR 不再套用 1500 字元或 40 行上限。Release 內含繁中與英文語言資料；找不到 OCR 執行檔時仍會略過，不中斷轉換。
+**缺表備援：** 影像判斷會排除全頁背景與小型 Logo，只計入內容區嵌入圖。所有 `missing_table` 頁都使用同一套流程：裁切表格區，以 400 DPI 執行 PSM 3 與 PSM 6，再依數值種類、格式化數值、表格列密度及雜訊量選出單一結果。正式邏輯不含特定檔名、頁碼、KPI 或數值例外。正文會插入 `[表格遺失]`、文字層脈絡「圖片描述」、完整 OCR 文字及整頁 `imgN.png`；`_quality.json` 以 `structured_table_status` 與 `recovery_status` 分開呈現結構缺口及 OCR 可用狀態。`.raw.md` 刻意維持原始擷取內容不變。Release 內含繁中與英文語言資料；找不到 OCR 執行檔時仍會略過，不中斷轉換。
 
 **M7 SRS 範例（Bug 修復後）：** `pages_exported: 14`、`tables_extracted: 32`、`image_paths` 14 筆、gaps 7 項。
 

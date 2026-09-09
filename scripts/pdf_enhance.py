@@ -11,7 +11,6 @@ import re
 import shutil
 import subprocess
 import sys
-from collections import Counter
 from pathlib import Path
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -237,63 +236,70 @@ def _numeric_tokens(text: str) -> list[str]:
     ]
 
 
-def _merge_sparse_numeric_supplement(primary: str, sparse: str) -> str:
-    """Append PSM-11 lines only when they add numeric occurrences missed by PSM-3."""
-    if not sparse.strip():
-        return primary
-
-    primary_counts = Counter(_numeric_tokens(primary))
-    observed_counts: Counter[str] = Counter()
-    supplements: list[str] = []
-    for line in sparse.splitlines():
-        tokens = _numeric_tokens(line)
-        adds_missing_value = False
-        for token in tokens:
-            observed_counts[token] += 1
-            if observed_counts[token] > primary_counts[token]:
-                adds_missing_value = True
-        if adds_missing_value:
-            supplements.append(line)
-
-    if not supplements:
-        return primary
+def _ocr_candidate_score(text: str) -> tuple[int, int, int, int, int, int]:
+    """Rank OCR candidates using generic table-content signals, not document values."""
+    tokens = _numeric_tokens(text)
+    unique_tokens = set(tokens)
+    formatted_values = sum(
+        1
+        for token in tokens
+        if any(marker in token for marker in (",", ".", "%", "/"))
+    )
+    tabular_lines = sum(
+        1 for line in text.splitlines() if len(_numeric_tokens(line)) >= 2
+    )
+    singleton_noise = sum(
+        1
+        for line in text.splitlines()
+        if 0 < len(re.sub(r"\W", "", line, flags=re.UNICODE)) <= 2
+    )
     return (
-        f"{primary}\n"
-        "--- OCR 補充辨識（稀疏數值） ---\n"
-        + "\n".join(supplements)
+        len(unique_tokens),
+        formatted_values,
+        tabular_lines,
+        len(tokens),
+        -singleton_noise,
+        len(text),
     )
 
 
-def _try_ocr_text(image_path: Path) -> tuple[str, str]:
-    """Return complete OCR text using table and sparse-text passes. Never raises."""
+def _try_ocr_text(image_path: Path) -> tuple[str, str, str]:
+    """Select one complete OCR result from general table-layout strategies."""
     executable = _find_tesseract()
     if not executable:
-        return "", "skipped_no_executable"
+        return "", "skipped_no_executable", "none"
 
     try:
         tessdata_dir = _find_tessdata_dir()
         languages = _available_ocr_languages(executable, tessdata_dir)
         selected = "+".join(lang for lang in ("chi_tra", "eng") if lang in languages)
         if not selected:
-            return "", "skipped_no_language"
+            return "", "skipped_no_language", "none"
 
-        primary, primary_status = _run_tesseract(
-            executable, tessdata_dir, image_path, selected, psm=3
+        candidates = []
+        errors = []
+        for psm in (3, 6):
+            text, status = _run_tesseract(
+                executable, tessdata_dir, image_path, selected, psm=psm
+            )
+            if status.startswith("error"):
+                errors.append(status)
+                continue
+            if text:
+                candidates.append((text, psm))
+        if not candidates:
+            return "", errors[0] if errors else "ok_empty", "none"
+
+        text, selected_psm = max(
+            candidates,
+            key=lambda candidate: _ocr_candidate_score(candidate[0]),
         )
-        if primary_status.startswith("error", 0):
-            return "", primary_status
-        sparse, sparse_status = _run_tesseract(
-            executable, tessdata_dir, image_path, selected, psm=11
-        )
-        if sparse_status.startswith("error", 0):
-            return primary, "ok" if primary else primary_status
-        text = _merge_sparse_numeric_supplement(primary, sparse)
     except Exception as exc:
-        return "", f"error:{type(exc).__name__}:{exc}"
+        return "", f"error:{type(exc).__name__}:{exc}", "none"
 
     if not text.strip():
-        return "", "ok_empty"
-    return text, "ok"
+        return "", "ok_empty", f"psm_{selected_psm}"
+    return text, "ok", f"psm_{selected_psm}"
 
 
 def main() -> int:
@@ -370,6 +376,7 @@ def main() -> int:
                 "image_caption": "",
                 "ocr_preview": "",
                 "ocr_status": "not_attempted",
+                "ocr_method": "none",
                 "context_hints": [],
             }
             result["pages"].append(page_info)
@@ -407,6 +414,7 @@ def main() -> int:
                         "image_caption": "",
                         "ocr_preview": "",
                         "ocr_status": "not_attempted",
+                        "ocr_method": "none",
                         "context_hints": [],
                     }
                     result["pages"].append(page_info)
@@ -495,11 +503,13 @@ def main() -> int:
         for page_info in result["pages"]:
             if not page_info.get("likely_image_table"):
                 page_info["ocr_status"] = "not_attempted"
+                page_info["ocr_method"] = "none"
                 continue
             img_rel = page_info.get("image_path") or ""
             img_path = output_dir / img_rel
             if not img_path.is_file():
                 page_info["ocr_status"] = "skipped_no_image"
+                page_info["ocr_method"] = "none"
                 continue
 
             ocr_path = img_path
@@ -517,9 +527,10 @@ def main() -> int:
                         clip = fitz.Rect(*largest)
                     page.get_pixmap(dpi=OCR_TABLE_DPI, clip=clip).save(str(temp_path))
                     ocr_path = temp_path
-                preview, status = _try_ocr_text(ocr_path)
+                preview, status, method = _try_ocr_text(ocr_path)
                 page_info["ocr_preview"] = preview
                 page_info["ocr_status"] = status
+                page_info["ocr_method"] = method
             finally:
                 if temp_path.is_file():
                     temp_path.unlink()

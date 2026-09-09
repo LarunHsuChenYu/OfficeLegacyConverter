@@ -77,6 +77,10 @@ internal static class MarkdownPostProcessor
                     sb.AppendLine($"      description: {YamlQuote(gap.Description!)}");
                 if (!string.IsNullOrEmpty(gap.Severity))
                     sb.AppendLine($"      severity: {YamlQuote(gap.Severity!)}");
+                if (!string.IsNullOrEmpty(gap.StructuredTableStatus))
+                    sb.AppendLine($"      structured_table_status: {YamlQuote(gap.StructuredTableStatus!)}");
+                if (!string.IsNullOrEmpty(gap.RecoveryStatus))
+                    sb.AppendLine($"      recovery_status: {YamlQuote(gap.RecoveryStatus!)}");
                 if (gap.PdfPages is { Length: > 0 })
                     sb.AppendLine($"      pdf_pages: [{string.Join(", ", gap.PdfPages)}]");
             }
@@ -229,6 +233,10 @@ internal static class MarkdownPostProcessor
                 Location = $"p.{page.PageNumber}",
                 Description = "文字層無明細表（疑似影像／Excel 截圖表格）",
                 Severity = "high",
+                StructuredTableStatus = "missing",
+                RecoveryStatus = page.OcrStatus == "ok" && !string.IsNullOrWhiteSpace(page.OcrPreview)
+                    ? "ocr_available_unverified"
+                    : "image_only",
                 PdfPages = [page.PageNumber]
             });
         }
@@ -1000,11 +1008,14 @@ internal static class MarkdownPostProcessor
     private static List<string> BuildMissingTableBlock(PdfPageInfo page, string caption)
     {
         var label = Path.GetFileNameWithoutExtension(page.Filename);
+        var recoveryStatus = page.OcrStatus == "ok" && !string.IsNullOrWhiteSpace(page.OcrPreview)
+            ? "；已有 OCR 可搜尋文字（未經逐格驗證）"
+            : "；目前仍需查看截圖";
         var block = new List<string>
         {
             "",
             $"> **[表格遺失：影像表 p.{page.PageNumber}]**",
-            "> - 狀態：文字層無明細表；已附整頁截圖與文字描述",
+            $"> - 狀態：結構化表格缺失{recoveryStatus}",
             $"> - 圖片描述：{caption}"
         };
 
@@ -1240,6 +1251,7 @@ internal static class MarkdownPostProcessor
                     likely_image_table = p.LikelyImageTable,
                     image_caption = p.ImageCaption,
                     ocr_status = p.OcrStatus,
+                    ocr_method = p.OcrMethod,
                     ocr_text_length = string.IsNullOrEmpty(p.OcrPreview) ? 0 : p.OcrPreview.Length,
                     ocr_truncated = false,
                     // Backward-compatible alias for existing report consumers.
@@ -1261,6 +1273,8 @@ internal static class MarkdownPostProcessor
                 g.Field,
                 g.Description,
                 g.Severity,
+                structured_table_status = g.StructuredTableStatus,
+                recovery_status = g.RecoveryStatus,
                 pdf_pages = g.PdfPages
             })
         };
