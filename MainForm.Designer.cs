@@ -112,7 +112,7 @@ partial class MainForm
         lblVersionInfo.Name = "lblVersionInfo";
         lblVersionInfo.Size = new Size(238, 22);
         lblVersionInfo.TabIndex = 2;
-        lblVersionInfo.Text = "v1.1.0 · 2026-09-09";
+        lblVersionInfo.Text = "v1.1.1 · 2026-09-09";
         lblVersionInfo.TextAlign = ContentAlignment.MiddleRight;
         // 
         // pnlAccent

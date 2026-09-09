@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using OfficeLegacyConverter;
 
 var outDir = args.Length > 0 ? args[0] : @"d:\VS\Doc2Docx\_regress_kpi";
@@ -51,6 +52,12 @@ var gaps = json.RootElement.GetProperty("gaps").EnumerateArray()
     .Select(g => (Type: g.GetProperty("Type").GetString(), Loc: g.GetProperty("Location").GetString()))
     .ToList();
 var missing = gaps.Where(g => g.Type == "missing_table").ToList();
+var qualityPages = json.RootElement
+    .GetProperty("pdf_enhancement")
+    .GetProperty("pages")
+    .EnumerateArray()
+    .Where(p => expectedMissingPages.Contains(p.GetProperty("page").GetInt32()))
+    .ToList();
 Console.WriteLine($"missing_table count={missing.Count}");
 foreach (var g in missing)
     Console.WriteLine($"  {g.Loc}");
@@ -63,19 +70,57 @@ Console.WriteLine($"md has 圖片索引={(md.Contains("## 圖片索引", StringC
 Console.WriteLine($"raw has 圖片索引={(File.ReadAllText(result.RawMdPath!).Contains("## 圖片索引", StringComparison.Ordinal) ? "yes" : "no")}");
 
 var semanticCoverageIsDynamic =
-    md.Contains($"偵測到 {expectedMissingPages.Length} 頁影像表格未轉為可搜尋文字", StringComparison.Ordinal)
+    md.Contains($"{expectedMissingPages.Length} 頁影像表格未還原為結構化表格；已有 OCR 可搜尋文字", StringComparison.Ordinal)
     && !md.Contains("通常 90%+", StringComparison.Ordinal);
+var qualityReportsCompleteOcr = qualityPages.All(p =>
+    !p.GetProperty("ocr_truncated").GetBoolean()
+    && p.GetProperty("ocr_text_length").GetInt32()
+        == p.GetProperty("ocr_preview_length").GetInt32());
 var ocrPages = enhance.Pages.Where(p => expectedMissingPages.Contains(p.PageNumber)).ToList();
 var page4Ocr = enhance.Pages.Single(p => p.PageNumber == 4).OcrPreview;
 var sampleValueFound = enhance.PagesExported != 16
     || page4Ocr.Contains("15,644,421", StringComparison.Ordinal);
 Console.WriteLine($"p4 sample value found={sampleValueFound}");
+var fullTextNotTruncated = enhance.PagesExported != 16
+    || new[] { 4, 7, 10 }.All(page =>
+    {
+        var text = enhance.Pages.Single(p => p.PageNumber == page).OcrPreview;
+        return text.Length > 1501 && !text.EndsWith('…');
+    });
+var page4TailFound = enhance.PagesExported != 16
+    || page4Ocr.Contains("Key Reads", StringComparison.OrdinalIgnoreCase);
+var page7Ocr = enhance.Pages.Single(p => p.PageNumber == 7).OcrPreview;
+var page7TailFound = enhance.PagesExported != 16
+    || new[] { "675", "488", "77", "29", "159", "107", "34", "8" }
+        .All(value => page7Ocr.Contains(value, StringComparison.Ordinal));
+var page9Ocr = enhance.Pages.Single(p => p.PageNumber == 9).OcrPreview;
+var page9RiValuesFound = enhance.PagesExported != 16
+    || Regex.IsMatch(
+        page9Ocr,
+        @"RI Sales / Penetration Carpark\s*-\s*%.*?\b13\b.*?\b2\b",
+        RegexOptions.IgnoreCase | RegexOptions.Singleline);
+var page10Ocr = enhance.Pages.Single(p => p.PageNumber == 10).OcrPreview;
+var page10TailFound = enhance.PagesExported != 16
+    || new[] { "20,811", "2,671", "3,999" }
+        .All(value => page10Ocr.Contains(value, StringComparison.Ordinal));
+Console.WriteLine($"full OCR not truncated={fullTextNotTruncated}");
+Console.WriteLine($"p4 tail found={page4TailFound}");
+Console.WriteLine($"p7 tail found={page7TailFound}");
+Console.WriteLine($"p9 RI values found={page9RiValuesFound}");
+Console.WriteLine($"p10 tail found={page10TailFound}");
+Console.WriteLine($"quality reports complete OCR={qualityReportsCompleteOcr}");
 var ok =
     actualLikelyPages.SequenceEqual(expectedMissingPages)
     && missing.Count == expectedMissingPages.Length
     && lossMarkers.Count == expectedMissingPages.Length
     && ocrPages.All(p => p.OcrStatus == "ok" && !string.IsNullOrWhiteSpace(p.OcrPreview))
     && sampleValueFound
+    && fullTextNotTruncated
+    && page4TailFound
+    && page7TailFound
+    && page9RiValuesFound
+    && page10TailFound
+    && qualityReportsCompleteOcr
     && semanticCoverageIsDynamic;
 Console.WriteLine(ok ? "REGRESS_OK" : "REGRESS_FAIL");
 return ok ? 0 : 2;

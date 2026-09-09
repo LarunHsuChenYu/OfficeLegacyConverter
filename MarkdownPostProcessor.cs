@@ -55,7 +55,9 @@ internal static class MarkdownPostProcessor
             .Distinct()
             .Count();
         var coverageMessage = missingTablePages > 0
-            ? $"未評估；偵測到 {missingTablePages} 頁影像表格未轉為可搜尋文字，不得套用固定覆蓋率"
+            ? metadata.OcrSearchablePageCount >= missingTablePages
+                ? $"未評估；偵測到 {missingTablePages} 頁影像表格未還原為結構化表格；已有 OCR 可搜尋文字"
+                : $"未評估；偵測到 {missingTablePages} 頁影像表格未還原為結構化表格；其中 {metadata.OcrSearchablePageCount} 頁已有 OCR 可搜尋文字"
             : "自動轉換，語意覆蓋率待人工評估";
         sb.AppendLine($"  semantic_coverage: {YamlQuote(coverageMessage)}");
         if (metadata.KnownGaps.Count == 0)
@@ -87,7 +89,7 @@ internal static class MarkdownPostProcessor
         sb.AppendLine("  本文件由 Office/PDF 自動轉換而來，屬知識分級 Tier-1 原始擷取。");
         sb.AppendLine("  遇到 [圖片補足]、[待補]、[表格待修]、[表格遺失] 標記時，以標記內容為準，不得腦補。");
         sb.AppendLine("  引用時請註明 source_file 與章節編號。");
-        sb.AppendLine("  若表格破碎或遺失，請對照 source_file、頁面截圖與圖片描述／OCR 摘要；孤立頁碼已清理，勿當作需求內容。");
+        sb.AppendLine("  若表格破碎或遺失，請對照 source_file、頁面截圖與圖片描述／完整 OCR 文字；孤立頁碼已清理，勿當作需求內容。");
         sb.AppendLine("  圖片索引與缺表文字描述僅存在於最終 .md（不在 .raw.md）。");
         sb.AppendLine("---");
         sb.AppendLine();
@@ -407,7 +409,9 @@ internal static class MarkdownPostProcessor
             KnowledgeTier = 1,
             DocumentType = InferDocumentType(sourceFilePath),
             ImagesFolder = imagesFolder,
-            KnownGaps = gaps
+            KnownGaps = gaps,
+            OcrSearchablePageCount = pdfEnhancement?.Pages.Count(
+                p => p.OcrStatus == "ok" && !string.IsNullOrWhiteSpace(p.OcrPreview)) ?? 0
         };
 
         var finalContent = InjectYamlFrontMatter(processed, metadata);
@@ -1019,7 +1023,7 @@ internal static class MarkdownPostProcessor
             return;
 
         var lines = summary.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
-        block.Add($"> - OCR 摘要：{lines[0]}");
+        block.Add($"> - OCR 文字：{lines[0]}");
         for (var i = 1; i < lines.Length; i++)
             block.Add($"> {lines[i]}");
     }
@@ -1236,6 +1240,9 @@ internal static class MarkdownPostProcessor
                     likely_image_table = p.LikelyImageTable,
                     image_caption = p.ImageCaption,
                     ocr_status = p.OcrStatus,
+                    ocr_text_length = string.IsNullOrEmpty(p.OcrPreview) ? 0 : p.OcrPreview.Length,
+                    ocr_truncated = false,
+                    // Backward-compatible alias for existing report consumers.
                     ocr_preview_length = string.IsNullOrEmpty(p.OcrPreview) ? 0 : p.OcrPreview.Length
                 }),
                 note = "圖片索引與缺表文字描述僅寫入最終 .md，不會出現在 .raw.md",

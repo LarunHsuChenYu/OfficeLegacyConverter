@@ -13,6 +13,7 @@ internal sealed class MarkdownMetadata
     public string DocumentType { get; init; } = "document";
     public string? ImagesFolder { get; init; }
     public IReadOnlyList<KnownGap> KnownGaps { get; init; } = [];
+    public int OcrSearchablePageCount { get; init; }
 }
 
 internal sealed class KnownGap

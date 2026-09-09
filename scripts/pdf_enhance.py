@@ -11,6 +11,7 @@ import re
 import shutil
 import subprocess
 import sys
+from collections import Counter
 from pathlib import Path
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -20,10 +21,9 @@ elif hasattr(sys.stdout, "buffer"):
 
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 
-OCR_PREVIEW_MAX_CHARS = 1500
-OCR_PREVIEW_MAX_LINES = 40
 CONTENT_IMAGE_MIN_AREA_RATIO = 0.03
 FULL_PAGE_IMAGE_AREA_RATIO = 0.90
+OCR_TABLE_DPI = 400
 
 
 def _table_to_markdown(rows: list[list[str]]) -> str:
@@ -120,20 +120,27 @@ def _build_image_caption(page_num: int, title: str, bullets: list[str]) -> str:
     return "".join(parts)
 
 
-def _content_image_count(page) -> int:
-    """Count meaningful embedded images, excluding full-page backgrounds and logos."""
+def _content_image_boxes(page) -> list[tuple[float, float, float, float]]:
+    """Return PyMuPDF-coordinate boxes for content images, excluding backgrounds/logos."""
     page_area = float(page.width * page.height)
     if page_area <= 0:
-        return 0
+        return []
 
-    count = 0
+    boxes = []
     for image in page.images or []:
         width = float(image.get("width") or 0)
         height = float(image.get("height") or 0)
         area_ratio = (width * height) / page_area
         if CONTENT_IMAGE_MIN_AREA_RATIO <= area_ratio < FULL_PAGE_IMAGE_AREA_RATIO:
-            count += 1
-    return count
+            boxes.append(
+                (
+                    float(image.get("x0") or 0),
+                    float(page.height - (image.get("y1") or page.height)),
+                    float(image.get("x1") or page.width),
+                    float(page.height - (image.get("y0") or 0)),
+                )
+            )
+    return boxes
 
 
 def _find_tesseract() -> str | None:
@@ -186,8 +193,79 @@ def _available_ocr_languages(executable: str, tessdata_dir: str | None) -> set[s
     }
 
 
-def _try_ocr_preview(image_path: Path) -> tuple[str, str]:
-    """Return (ocr_preview, ocr_status). Never raises."""
+def _run_tesseract(
+    executable: str,
+    tessdata_dir: str | None,
+    image_path: Path,
+    language: str,
+    psm: int,
+) -> tuple[str, str]:
+    command = [executable]
+    if tessdata_dir:
+        command.extend(["--tessdata-dir", tessdata_dir])
+    command.extend(
+        [str(image_path), "stdout", "-l", language, "--psm", str(psm)]
+    )
+    completed = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=120,
+        check=False,
+    )
+    if completed.returncode != 0:
+        detail = completed.stderr.strip().replace("\n", " ")[:240]
+        return "", f"error:exit_{completed.returncode}:{detail}"
+    cleaned = "\n".join(
+        line.strip()
+        for line in (completed.stdout or "").splitlines()
+        if line.strip()
+    )
+    return cleaned, "ok" if cleaned else "ok_empty"
+
+
+def _numeric_tokens(text: str) -> list[str]:
+    return [
+        token.replace(" ", "")
+        for token in re.findall(
+            r"(?<![\w])(?:n/?a|[-+]?\d[\d,.]*(?:%|/\d[\d,.]*)?)",
+            text,
+            flags=re.IGNORECASE,
+        )
+    ]
+
+
+def _merge_sparse_numeric_supplement(primary: str, sparse: str) -> str:
+    """Append PSM-11 lines only when they add numeric occurrences missed by PSM-3."""
+    if not sparse.strip():
+        return primary
+
+    primary_counts = Counter(_numeric_tokens(primary))
+    observed_counts: Counter[str] = Counter()
+    supplements: list[str] = []
+    for line in sparse.splitlines():
+        tokens = _numeric_tokens(line)
+        adds_missing_value = False
+        for token in tokens:
+            observed_counts[token] += 1
+            if observed_counts[token] > primary_counts[token]:
+                adds_missing_value = True
+        if adds_missing_value:
+            supplements.append(line)
+
+    if not supplements:
+        return primary
+    return (
+        f"{primary}\n"
+        "--- OCR 補充辨識（稀疏數值） ---\n"
+        + "\n".join(supplements)
+    )
+
+
+def _try_ocr_text(image_path: Path) -> tuple[str, str]:
+    """Return complete OCR text using table and sparse-text passes. Never raises."""
     executable = _find_tesseract()
     if not executable:
         return "", "skipped_no_executable"
@@ -199,41 +277,23 @@ def _try_ocr_preview(image_path: Path) -> tuple[str, str]:
         if not selected:
             return "", "skipped_no_language"
 
-        command = [executable]
-        if tessdata_dir:
-            command.extend(["--tessdata-dir", tessdata_dir])
-        command.extend(
-            [str(image_path), "stdout", "-l", selected, "--psm", "3"]
+        primary, primary_status = _run_tesseract(
+            executable, tessdata_dir, image_path, selected, psm=3
         )
-        completed = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=120,
-            check=False,
+        if primary_status.startswith("error", 0):
+            return "", primary_status
+        sparse, sparse_status = _run_tesseract(
+            executable, tessdata_dir, image_path, selected, psm=11
         )
-        if completed.returncode != 0:
-            detail = completed.stderr.strip().replace("\n", " ")[:240]
-            return "", f"error:exit_{completed.returncode}:{detail}"
-        text = completed.stdout
+        if sparse_status.startswith("error", 0):
+            return primary, "ok" if primary else primary_status
+        text = _merge_sparse_numeric_supplement(primary, sparse)
     except Exception as exc:
         return "", f"error:{type(exc).__name__}:{exc}"
 
-    cleaned_lines = []
-    for ln in (text or "").splitlines():
-        s = ln.strip()
-        if s:
-            cleaned_lines.append(s)
-        if len(cleaned_lines) >= OCR_PREVIEW_MAX_LINES:
-            break
-    preview = "\n".join(cleaned_lines)
-    if len(preview) > OCR_PREVIEW_MAX_CHARS:
-        preview = preview[:OCR_PREVIEW_MAX_CHARS] + "…"
-    if not preview.strip():
+    if not text.strip():
         return "", "ok_empty"
-    return preview, "ok"
+    return text, "ok"
 
 
 def main() -> int:
@@ -278,6 +338,7 @@ def main() -> int:
     images_dir.mkdir(parents=True, exist_ok=True)
 
     page_by_num: dict[int, dict] = {}
+    content_boxes_by_page: dict[int, list[tuple[float, float, float, float]]] = {}
 
     # --- Page PNG export via PyMuPDF ---
     try:
@@ -353,9 +414,11 @@ def main() -> int:
 
                 chars = page.chars or []
                 images = page.images or []
+                content_boxes = _content_image_boxes(page)
+                content_boxes_by_page[page_num] = content_boxes
                 page_info["char_count"] = len(chars)
                 page_info["embedded_image_count"] = len(images)
-                page_info["content_image_count"] = _content_image_count(page)
+                page_info["content_image_count"] = len(content_boxes)
 
                 title, bullets = _page_text_hints(page)
                 hints = []
@@ -418,8 +481,8 @@ def main() -> int:
         result["errors"].append(f"pdfplumber 表格擷取失敗：{exc}")
 
     # --- Optional OCR for likely image-table pages ---
-    # OCR gets a temporary 300-DPI render; the normal 150-DPI image remains the
-    # Markdown visual fallback. Higher resolution is required for table values.
+    # OCR gets a temporary render cropped to the embedded table image. The normal
+    # 150-DPI full-page image remains the Markdown visual fallback.
     ocr_doc = None
     try:
         import fitz
@@ -444,9 +507,17 @@ def main() -> int:
             try:
                 if ocr_doc is not None:
                     page = ocr_doc.load_page(page_info["page_number"] - 1)
-                    page.get_pixmap(dpi=300).save(str(temp_path))
+                    boxes = content_boxes_by_page.get(page_info["page_number"], [])
+                    clip = None
+                    if boxes:
+                        largest = max(
+                            boxes,
+                            key=lambda box: (box[2] - box[0]) * (box[3] - box[1]),
+                        )
+                        clip = fitz.Rect(*largest)
+                    page.get_pixmap(dpi=OCR_TABLE_DPI, clip=clip).save(str(temp_path))
                     ocr_path = temp_path
-                preview, status = _try_ocr_preview(ocr_path)
+                preview, status = _try_ocr_text(ocr_path)
                 page_info["ocr_preview"] = preview
                 page_info["ocr_status"] = status
             finally:

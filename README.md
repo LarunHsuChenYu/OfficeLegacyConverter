@@ -10,7 +10,8 @@ Windows 桌面工具，用於：
 
 ## 版本
 
-目前版本：`1.1.0`  
+目前版本：`1.1.1`
+
 發布日期：`2026-09-09`
 
 版本與日期會顯示在主畫面抬頭及 Windows 視窗標題。
@@ -21,10 +22,10 @@ PDF 增強流程會：
 
 1. 用 pdfplumber 擷取文字層表格。
 2. 排除全頁背景與小型 Logo，只把內容區的大型嵌入圖片視為影像表候選。
-3. 對缺表頁加入 `missing_table`、頁面截圖、文字描述及 OCR 摘要。
+3. 對缺表頁裁切表格區，以 400 DPI／多模式 OCR 保留完整可搜尋文字。
 4. 在 `_quality.json` 區分 `tables_extracted_total` 與 `tables_extracted_good`。
 
-若有影像表格未轉成可搜尋文字，Markdown 的 `semantic_coverage` 會明確列出缺表頁數，不再宣稱固定的 `90%+`。
+若影像表格尚未還原為 Markdown 結構化表格，`semantic_coverage` 會列出缺表頁數，並區分是否已有 OCR 可搜尋文字，不再宣稱固定的 `90%+`。
 
 ## OCR
 

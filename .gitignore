@@ -10,6 +10,8 @@ _ocr_probe/
 *.log
 tools/**/bin/
 tools/**/obj/
+__pycache__/
+*.pyc
 ## Build
 bin/
 obj/
