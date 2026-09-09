@@ -1,0 +1,34 @@
+.vs/
+bin/
+obj/
+artifacts/
+publish/
+_regress*/
+_ocr_probe/
+*.user
+*.suo
+*.log
+tools/**/bin/
+tools/**/obj/
+## Build
+bin/
+obj/
+**/bin/
+**/obj/
+
+## Visual Studio / VS Code
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+## Logs & local verification artifacts
+*.log
+verify_output.json
+verify_*_output.json
+
+## OS
+Thumbs.db
+Desktop.ini
+.DS_Store
