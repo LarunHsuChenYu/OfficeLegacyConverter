@@ -9,10 +9,10 @@
     <RootNamespace>OfficeLegacyConverter</RootNamespace>
     <AssemblyName>OfficeLegacyConverter</AssemblyName>
     <ApplicationIcon>assets\app.ico</ApplicationIcon>
-    <Version>1.1.2</Version>
-    <FileVersion>1.1.2.0</FileVersion>
-    <AssemblyVersion>1.1.2.0</AssemblyVersion>
-    <ReleaseDate>2026-09-09</ReleaseDate>
+    <Version>1.1.3</Version>
+    <FileVersion>1.1.3.0</FileVersion>
+    <AssemblyVersion>1.1.3.0</AssemblyVersion>
+    <ReleaseDate>2026-09-10</ReleaseDate>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)' == 'Release'">

@@ -71,8 +71,18 @@ var md = File.ReadAllText(result.FinalMdPath);
 var lossMarkers = System.Text.RegularExpressions.Regex.Matches(md, @"\[表格遺失：影像表 p\.(\d+)\]");
 Console.WriteLine($"md missing markers={lossMarkers.Count}");
 Console.WriteLine($"md has 圖片描述={(md.Contains("圖片描述：", StringComparison.Ordinal) ? "yes" : "no")}");
-Console.WriteLine($"md has 圖片索引={(md.Contains("## 圖片索引", StringComparison.Ordinal) ? "yes" : "no")}");
-Console.WriteLine($"raw has 圖片索引={(File.ReadAllText(result.RawMdPath!).Contains("## 圖片索引", StringComparison.Ordinal) ? "yes" : "no")}");
+var noTrailingImageIndex = !md.Contains("## 圖片索引", StringComparison.Ordinal);
+var rawHasNoImageIndex = !File.ReadAllText(result.RawMdPath!).Contains("## 圖片索引", StringComparison.Ordinal);
+var consistentLfLineEndings = !md.Contains('\r');
+var inlineImageRefs = Regex.Matches(md, @"!\[[^\]]*\]\([^)\n]*img\d+\.png\)").Count;
+var uniqueInlineImages = Regex.Matches(md, @"img(\d+)\.png")
+    .Select(m => m.Groups[1].Value)
+    .Distinct()
+    .Count();
+Console.WriteLine($"md has trailing 圖片索引={(!noTrailingImageIndex ? "yes" : "no")}");
+Console.WriteLine($"raw has 圖片索引={(!rawHasNoImageIndex ? "yes" : "no")}");
+Console.WriteLine($"consistent LF line endings={consistentLfLineEndings}");
+Console.WriteLine($"inline image refs={inlineImageRefs}; unique={uniqueInlineImages}");
 
 var semanticCoverageIsDynamic =
     md.Contains($"{expectedMissingPages.Length} 頁影像表格未還原為結構化表格；已有 OCR 可搜尋文字", StringComparison.Ordinal)
@@ -139,6 +149,10 @@ var ok =
     && page14ValuesFound
     && noSparseSupplementNoise
     && recoveryStatusIsExplicit
+    && noTrailingImageIndex
+    && rawHasNoImageIndex
+    && consistentLfLineEndings
+    && inlineImageRefs == uniqueInlineImages
     && qualityReportsCompleteOcr
     && semanticCoverageIsDynamic;
 Console.WriteLine(ok ? "REGRESS_OK" : "REGRESS_FAIL");

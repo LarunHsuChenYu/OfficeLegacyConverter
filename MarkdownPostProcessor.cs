@@ -94,12 +94,15 @@ internal static class MarkdownPostProcessor
         sb.AppendLine("  遇到 [圖片補足]、[待補]、[表格待修]、[表格遺失] 標記時，以標記內容為準，不得腦補。");
         sb.AppendLine("  引用時請註明 source_file 與章節編號。");
         sb.AppendLine("  若表格破碎或遺失，請對照 source_file、頁面截圖與圖片描述／完整 OCR 文字；孤立頁碼已清理，勿當作需求內容。");
-        sb.AppendLine("  圖片索引與缺表文字描述僅存在於最終 .md（不在 .raw.md）。");
+        sb.AppendLine("  圖片描述與缺表標記僅存在於最終 .md（不在 .raw.md）；頁面截圖只在對應頁面出現一次，不附文末重複索引。");
         sb.AppendLine("---");
         sb.AppendLine();
         sb.Append(body.TrimStart());
         return sb.ToString();
     }
+
+    private static string NormalizeMarkdownNewlines(string content) =>
+        content.Replace("\r\n", "\n").Replace('\r', '\n');
 
     private static (string cleaned, List<string> log) CleanPageArtifacts(string mdContent)
     {
@@ -141,7 +144,7 @@ internal static class MarkdownPostProcessor
             result.Add(line);
         }
 
-        return (string.Join(Environment.NewLine, result), log);
+        return (string.Join("\n", result), log);
     }
 
     private static List<KnownGap> DetectKnownGaps(string mdContent)
@@ -422,7 +425,7 @@ internal static class MarkdownPostProcessor
                 p => p.OcrStatus == "ok" && !string.IsNullOrWhiteSpace(p.OcrPreview)) ?? 0
         };
 
-        var finalContent = InjectYamlFrontMatter(processed, metadata);
+        var finalContent = NormalizeMarkdownNewlines(InjectYamlFrontMatter(processed, metadata));
         var finalPath = Path.Combine(outputDir, baseName + ".md");
         File.WriteAllText(finalPath, finalContent, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
 
@@ -814,7 +817,7 @@ internal static class MarkdownPostProcessor
             log.Add($"插入 {pendingTag} 標記");
         }
 
-        return string.Join(Environment.NewLine, result);
+        return string.Join("\n", result);
     }
 
     private static string ApplyBrokenTableAnnotations(
@@ -868,7 +871,7 @@ internal static class MarkdownPostProcessor
             result.Add(lines[j]);
         }
 
-        return string.Join(Environment.NewLine, result);
+        return string.Join("\n", result);
     }
 
     private static int? InferPageNumberNearLine(string[] lines, int lineIndex)
@@ -1002,7 +1005,7 @@ internal static class MarkdownPostProcessor
                 log.Add($"p.{pageNum} OCR 狀態：{page.OcrStatus}");
         }
 
-        return string.Join(Environment.NewLine, lines);
+        return string.Join("\n", lines);
     }
 
     private static List<string> BuildMissingTableBlock(PdfPageInfo page, string caption)
@@ -1083,9 +1086,55 @@ internal static class MarkdownPostProcessor
         if (enhancedCount > 0)
             log.Add($"於 {enhancedCount} 處「參考資料」插入 【imgN】 標記與圖片連結");
 
-        var indexBlock = BuildImageIndexSection(pdfEnhancement.Pages);
-        log.Add($"於文件末尾附加圖片索引（共 {pdfEnhancement.Pages.Count} 張；描述與索引僅寫入最終 .md，不寫入 .raw.md）");
-        return normalized.TrimEnd() + Environment.NewLine + indexBlock;
+        // Keep a single placement path: insert orphan page images at their page
+        // sections. Never append a trailing "## 圖片索引" that duplicates inline blocks.
+        normalized = InsertOrphanPdfPageImages(normalized, pdfEnhancement, log);
+        return normalized.TrimEnd() + "\n";
+    }
+
+    private static string InsertOrphanPdfPageImages(
+        string content,
+        PdfEnhancementResult pdfEnhancement,
+        List<string> log)
+    {
+        var sections = BuildPageSections(content);
+        var lines = content.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n').ToList();
+        var inserted = 0;
+
+        foreach (var page in pdfEnhancement.Pages.OrderByDescending(p => p.PageNumber))
+        {
+            if (string.IsNullOrWhiteSpace(page.ImagePath))
+                continue;
+            if (content.Contains(page.ImagePath, StringComparison.Ordinal)
+                || content.Contains($"![{Path.GetFileNameWithoutExtension(page.Filename)}]", StringComparison.Ordinal))
+                continue;
+
+            var block = BuildImageBlock(page, includeStatus: false)
+                .Replace("\r\n", "\n")
+                .Replace('\r', '\n')
+                .Split('\n')
+                .ToList();
+
+            int insertAt;
+            if (sections.TryGetValue(page.PageNumber, out var span))
+            {
+                insertAt = Math.Min(span.End, lines.Count);
+                while (insertAt > span.Start && insertAt > 0 && string.IsNullOrWhiteSpace(lines[insertAt - 1]))
+                    insertAt--;
+            }
+            else
+            {
+                insertAt = lines.Count;
+            }
+
+            lines.InsertRange(insertAt, block);
+            inserted++;
+        }
+
+        if (inserted > 0)
+            log.Add($"於對應頁面插入未重複的頁面截圖（{inserted} 張；不附加文末圖片索引）");
+
+        return string.Join("\n", lines);
     }
 
     private static string BuildReferenceImageSection(PdfPageInfo page)
@@ -1104,25 +1153,14 @@ internal static class MarkdownPostProcessor
     {
         var label = Path.GetFileNameWithoutExtension(page.Filename);
         var sb = new StringBuilder();
-        sb.AppendLine($"> **[圖片補足：p.{page.PageNumber}]**");
+        sb.Append($"> **[圖片補足：p.{page.PageNumber}]**\n");
         if (!string.IsNullOrWhiteSpace(page.ImageCaption))
-            sb.AppendLine($"> - 圖片描述：{page.ImageCaption}");
-        sb.AppendLine($"> {page.Marker}");
-        sb.AppendLine($"> ![{label}]({page.ImagePath})");
+            sb.Append($"> - 圖片描述：{page.ImageCaption}\n");
+        sb.Append($"> {page.Marker}\n");
+        sb.Append($"> ![{label}]({page.ImagePath})\n");
         if (includeStatus)
-            sb.AppendLine("> - 狀態：已自動擷取 PDF 頁面圖片，請人工補充欄位說明");
-        sb.AppendLine();
-        return sb.ToString();
-    }
-
-    private static string BuildImageIndexSection(IReadOnlyList<PdfPageInfo> pages)
-    {
-        var sb = new StringBuilder();
-        sb.AppendLine();
-        sb.AppendLine("## 圖片索引");
-        sb.AppendLine();
-        foreach (var page in pages)
-            sb.Append(BuildImageBlock(page));
+            sb.Append("> - 狀態：已自動擷取 PDF 頁面圖片，請人工補充欄位說明\n");
+        sb.Append('\n');
         return sb.ToString();
     }
 
@@ -1257,7 +1295,7 @@ internal static class MarkdownPostProcessor
                     // Backward-compatible alias for existing report consumers.
                     ocr_preview_length = string.IsNullOrEmpty(p.OcrPreview) ? 0 : p.OcrPreview.Length
                 }),
-                note = "圖片索引與缺表文字描述僅寫入最終 .md，不會出現在 .raw.md",
+                note = "頁面截圖與缺表文字描述僅寫入最終 .md（各頁一次，不附文末重複索引），不會出現在 .raw.md",
                 errors = pdfEnhancement.Errors,
                 error = pdfEnhancement.Error
             },

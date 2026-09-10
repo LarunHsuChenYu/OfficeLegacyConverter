@@ -1095,7 +1095,7 @@ flowchart LR
 
 ### B.1 `.md`（最終 Markdown）
 
-- **內容**：YAML 後設資料 + 經清理的正文 + 註解塊（`[待補]`、`[表格待修]`、`[圖片補足]`）+ 文末圖片索引。
+- **內容**：YAML 後設資料 + 經清理的正文 + 註解塊（`[待補]`、`[表格待修]`、`[圖片補足]`／`[表格遺失]`）；PDF 頁面截圖插在對應頁面，不附文末重複索引。
 - **用途**：RAG ingest、Git 版控、全文檢索索引。
 - **編碼**：UTF-8（無 BOM）。
 
@@ -1115,7 +1115,7 @@ flowchart LR
 | `refinement.status` | 預設 `raw` |
 | `llm_instructions` | 供 LLM 使用的引用與防腦補規則 |
 
-**【imgN】標記：** 後處理於「參考資料」等位置插入 **【img1】**～**【imgN】**，對應 `{basename}/imgN.png`；文末「## 圖片索引」彙整全部頁面圖連結。
+**【imgN】標記：** 後處理於「參考資料」、缺表備援或尚未內嵌的頁面區塊插入 **【img1】**～**【imgN】**，對應 `{basename}/imgN.png`；每頁只輸出一次，不再以文末「## 圖片索引」整份重列。
 
 <!-- 截圖：.md 檔案 YAML 區塊與【imgN】標記特寫 -->
 
@@ -1135,8 +1135,8 @@ flowchart LR
 - **結構**：
   - `source_file`、`converted_date`、`conversion_engine`（`MarkItDown` / `OpenXml`）
   - `cleanup.actions`：頁碼清理、幽靈列刪除等
-  - `enhancements.actions`：註解塊插入、圖片索引、`[表格待修]` 等
-  - `pdf_enhancement`（PDF 專用）：`pages_exported`、`tables_extracted` / `tables_extracted_total` / `tables_extracted_good`、`images_folder`、`image_paths`、`pages`（含 `marker`: 【imgN】、`content_image_count`、`likely_image_table`、`image_caption`、`ocr_status`）；`note` 說明圖片索引與缺表描述**僅在最終 `.md`**，不在 `.raw.md`
+  - `enhancements.actions`：註解塊插入、頁面截圖備援、`[表格待修]` 等
+  - `pdf_enhancement`（PDF 專用）：`pages_exported`、`tables_extracted` / `tables_extracted_total` / `tables_extracted_good`、`images_folder`、`image_paths`、`pages`（含 `marker`: 【imgN】、`content_image_count`、`likely_image_table`、`image_caption`、`ocr_status`）；`note` 說明頁面截圖與缺表描述**僅在最終 `.md`（各頁一次）**，不在 `.raw.md`
   - **`openxml_images`（DOCX 專用）**：見 **B.8**
   - **`openxml_sheets`（XLSX 專用）**：見 **B.7**
   - `gaps`：缺口清單（type、location、field、description、severity、pdf_pages）
@@ -1150,7 +1150,7 @@ flowchart LR
 | `missing_image` | 參考資料區段缺圖 | high |
 | `missing_table` | 該頁疑似影像／Excel 截圖表，文字層無明細表 | high |
 
-**缺表備援：** 影像判斷會排除全頁背景與小型 Logo，只計入內容區嵌入圖。所有 `missing_table` 頁都使用同一套流程：裁切表格區，以 400 DPI 執行 PSM 3 與 PSM 6，再依數值種類、格式化數值、表格列密度及雜訊量選出單一結果。正式邏輯不含特定檔名、頁碼、KPI 或數值例外。正文會插入 `[表格遺失]`、文字層脈絡「圖片描述」、完整 OCR 文字及整頁 `imgN.png`；`_quality.json` 以 `structured_table_status` 與 `recovery_status` 分開呈現結構缺口及 OCR 可用狀態。`.raw.md` 刻意維持原始擷取內容不變。Release 內含繁中與英文語言資料；找不到 OCR 執行檔時仍會略過，不中斷轉換。
+**缺表備援：** 影像判斷會排除全頁背景與小型 Logo，只計入內容區嵌入圖。所有 `missing_table` 頁都使用同一套流程：裁切表格區，以 400 DPI 執行 PSM 3 與 PSM 6，再依數值種類、格式化數值、表格列密度及雜訊量選出單一結果。正式邏輯不含特定檔名、頁碼、KPI 或數值例外。正文會在對應頁面插入 `[表格遺失]`、文字層脈絡「圖片描述」、完整 OCR 文字及整頁 `imgN.png`；尚未內嵌的頁面截圖也只插入一次於該頁，**不再**附加文末重複「## 圖片索引」。最終 `.md` 統一使用 LF 換行。`_quality.json` 以 `structured_table_status` 與 `recovery_status` 分開呈現結構缺口及 OCR 可用狀態。`.raw.md` 刻意維持原始擷取內容不變。Release 內含繁中與英文語言資料；找不到 OCR 執行檔時仍會略過，不中斷轉換。
 
 **M7 SRS 範例（Bug 修復後）：** `pages_exported: 14`、`tables_extracted: 32`、`image_paths` 14 筆、gaps 7 項。
 
@@ -1245,7 +1245,7 @@ flowchart LR
 | 獨立頁碼行清理 | 移除 1～99 的幽靈頁碼，避免被 LLM 誤判為需求編號 |
 | 表格幽靈列清理 | 移除僅含頁碼的表格列 |
 | 參考資料圖片占位 | 將「參考資料 + 頁碼」轉為 `[圖片補足：p.N]` 區塊 |
-| PDF 頁面圖匯出 | `{basename}/imgN.png` + 【imgN】標記 + 圖片索引 |
+| PDF 頁面圖匯出 | `{basename}/imgN.png` + 【imgN】標記（對應頁一次） |
 | pdfplumber 備選表 | 破碎表格旁插入 pdfplumber 擷取備選 |
 | 空白小節偵測 | 偵測 `(3) 資料來源`、`(4) 需求說明 A.` 等空白 → `[待補]` |
 | 破碎表格偵測 | 空儲存格比例 ≥ 55% 時標記 `[表格待修]` |
